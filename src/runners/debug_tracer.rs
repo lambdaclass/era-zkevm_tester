@@ -1,7 +1,10 @@
+use std::str::FromStr;
+
+use zk_evm::ethereum_types::U256;
 use zk_evm::tracing::*;
+use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, UMAOpcode};
 use zk_evm::{
     reference_impls::memory::SimpleMemory,
-    u256_to_address_unchecked,
     vm_state::*,
     zkevm_opcode_defs::decoding::{AllowedPcOrImm, EncodingModeProduction, VmEncodingMode},
 };
@@ -145,109 +148,60 @@ impl<const N: usize, E: VmEncodingMode<N>> Tracer<N, E> for DebugTracerWithAssem
         data: BeforeExecutionData<N, E>,
         memory: &Self::SupportedMemory,
     ) {
-        if get_tracing_mode() != VmTracingOptions::ManualVerbose {
+        // FIXME: this catches not only Evm contracts
+
+        let opcode_variant = data.opcode.variant;
+        let heap_page =
+            heap_page_from_base(state.vm_local_state.callstack.current.base_memory_page).0;
+
+        let src0_value = data.src0_value.value;
+
+        let fat_ptr = FatPointer::from_u256(src0_value);
+
+        let value = data.src1_value.value;
+
+        const DEBUG_SLOT: u32 = 32 * 32;
+
+        let debug_magic = U256::from_dec_str(
+            "33509158800074003487174289148292687789659295220513886355337449724907776218753",
+        )
+        .unwrap();
+
+        // Only `UMA` opcodes in the bootloader serve for vm hooks
+        if !matches!(opcode_variant.opcode, Opcode::UMA(UMAOpcode::HeapWrite))
+            || fat_ptr.offset != DEBUG_SLOT
+            || value != debug_magic
+        {
+            // println!("I tried");
             return;
         }
 
-        use zk_evm::zkevm_opcode_defs::*;
+        let how_to_print_value = memory.read_slot(heap_page, 32 + 1).value;
+        let value_to_print = memory.read_slot(heap_page, 32 + 2).value;
 
-        match data.opcode.variant.opcode {
-            Opcode::Ret(inner_variant) => {
-                if !state
-                    .vm_local_state
-                    .callstack
-                    .get_current_stack()
-                    .is_local_frame
-                {
-                    // catch returndata
-                    if inner_variant == RetOpcode::Ok || inner_variant == RetOpcode::Revert {
-                        let src0 = data.src0_value;
+        let print_as_hex_value =
+            U256::from_str("0x00debdebdebdebdebdebdebdebdebdebdebdebdebdebdebdebdebdebdebdebde")
+                .unwrap();
+        let print_as_string_value =
+            U256::from_str("0x00debdebdebdebdebdebdebdebdebdebdebdebdebdebdebdebdebdebdebdebdf")
+                .unwrap();
 
-                        let mut abi = RetABI::from_u256(src0.value);
-                        match abi.page_forwarding_mode {
-                            RetForwardPageType::ForwardFatPointer => {}
-                            RetForwardPageType::UseHeap => {
-                                abi.memory_quasi_fat_pointer.memory_page = heap_page_from_base(
-                                    state
-                                        .vm_local_state
-                                        .callstack
-                                        .get_current_stack()
-                                        .base_memory_page,
-                                )
-                                .0;
-                            }
-                            RetForwardPageType::UseAuxHeap => {
-                                abi.memory_quasi_fat_pointer.memory_page = aux_heap_page_from_base(
-                                    state
-                                        .vm_local_state
-                                        .callstack
-                                        .get_current_stack()
-                                        .base_memory_page,
-                                )
-                                .0;
-                            }
-                        };
+        if how_to_print_value == print_as_hex_value {
+            print!("PRINTED: ");
+            println!("0x{:02x}", value_to_print);
+        }
 
-                        let returndata =
-                            crate::runners::compiler_tests::dump_memory_page_using_fat_pointer(
-                                memory,
-                                abi.memory_quasi_fat_pointer,
-                            );
-
-                        println!(
-                            "Performed return/revert with {} bytes with 0x{}",
-                            returndata.len(),
-                            hex::encode(&returndata)
-                        );
-                    } else {
-                        println!("Returned with PANIC");
-                    }
-                }
-            }
-            Opcode::FarCall(_) => {
-                // catch calldata
-                let src0 = data.src0_value;
-                let src1 = data.src1_value;
-                let dest = u256_to_address_unchecked(&src1.value);
-
-                let mut abi = FarCallABI::from_u256(src0.value);
-                match abi.forwarding_mode {
-                    FarCallForwardPageType::ForwardFatPointer => {}
-                    FarCallForwardPageType::UseHeap => {
-                        abi.memory_quasi_fat_pointer.memory_page = heap_page_from_base(
-                            state
-                                .vm_local_state
-                                .callstack
-                                .get_current_stack()
-                                .base_memory_page,
-                        )
-                        .0;
-                    }
-                    FarCallForwardPageType::UseAuxHeap => {
-                        abi.memory_quasi_fat_pointer.memory_page = aux_heap_page_from_base(
-                            state
-                                .vm_local_state
-                                .callstack
-                                .get_current_stack()
-                                .base_memory_page,
-                        )
-                        .0;
-                    }
-                }
-
-                let calldata = crate::runners::compiler_tests::dump_memory_page_using_fat_pointer(
-                    memory,
-                    abi.memory_quasi_fat_pointer,
-                );
-
-                println!(
-                    "Performed far_call to {:?} with {} bytes with 0x{}",
-                    dest,
-                    calldata.len(),
-                    hex::encode(&calldata)
+        if how_to_print_value == print_as_string_value {
+            print!("PRINTED: ");
+            let mut value = value_to_print.0;
+            value.reverse();
+            for limb in value {
+                print!(
+                    "{}",
+                    String::from_utf8(limb.to_be_bytes().to_vec()).unwrap()
                 );
             }
-            _ => {}
+            println!("");
         }
     }
     fn after_execution(

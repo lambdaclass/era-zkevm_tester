@@ -786,7 +786,10 @@ fn run_vm_multi_contracts_inner<const N: usize, E: VmEncodingMode<N>>(
 
     let mut cycles_used = 0;
 
-    match get_tracing_mode() {
+    let tracing_mode = VmTracingOptions::ManualVerbose;
+
+    // match get_tracing_mode() {
+    match tracing_mode {
         VmTracingOptions::None => {
             vm.witness_tracer.is_dummy = true;
             let mut tracer = GenericNoopTracer::new();
