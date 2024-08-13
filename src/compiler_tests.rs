@@ -1,6 +1,7 @@
 use crate::default_environment::*;
 use crate::events::SolidityLikeEvent;
 use crate::hashmap_based_memory::SimpleHashmapMemory;
+use crate::lambda_tracer::LambdaTracer;
 use crate::simple_witness_tracer::MemoryLogWitnessTracer;
 use crate::utils::IntoFixedLengthByteIterator;
 use crate::{Address, H256, U256};
@@ -573,7 +574,7 @@ fn run_vm_multi_contracts_inner(
 
     let mut cycles_used = 0;
     vm.witness_tracer.is_dummy = true;
-    let mut tracer = GenericNoopTracer::new();
+    let mut tracer = LambdaTracer::new();
     for _ in 0..cycles_limit {
         vm.cycle(&mut tracer)?;
         super::evm_deploy::record_deployed_evm_bytecode(&mut vm);

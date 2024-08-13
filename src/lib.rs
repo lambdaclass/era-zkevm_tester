@@ -17,3 +17,4 @@ pub mod evm_deploy;
 pub mod hashmap_based_memory;
 pub mod simple_witness_tracer;
 pub mod utils;
+pub mod lambda_tracer;
